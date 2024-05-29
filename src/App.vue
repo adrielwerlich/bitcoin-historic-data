@@ -1,11 +1,12 @@
 <script setup>
 import CurrentBitcoinPrice from "./components/CurrentBitcoinPrice.vue";
+import PriceAtMomentCard from "./components/PriceAtMomentCard.vue";
 import * as d3 from "d3";
-import { ref, watch, onMounted, onUnmounted, watchEffect } from "vue";
+import { ref, watch, onMounted, onUnmounted, reactive } from "vue";
 
 import "@vueform/slider/themes/default.css";
 import VueSlider from "@vueform/slider";
-import { fetchData } from "./api/fetch.js";
+import { fetchData, fetchBitcoinPriceAtMoment } from "./api/fetch.js";
 
 const width = ref(window.innerWidth * 0.95);
 let resizeListener, formattedData;
@@ -18,8 +19,14 @@ const marks = ref({
   365: "365 Days",
 });
 const isLoading = ref(false);
-
+const selectedDateTime = ref(null);
 const selectedCoin = ref("bitcoin");
+const showPriceAtMoment = ref(false);
+const bitcoinData = reactive({
+  current_price: 0,
+  market_cap: 0,
+  total_volume: 0,
+});
 
 const drawGraph = (formattedData) => {
   d3.select(svgRef.value)?.selectAll("g")?.remove();
@@ -86,11 +93,41 @@ const fetchAndUpdateData = async () => {
   } catch (error) {
     console.error("Error:", error);
   } finally {
-    setTimeout(() => {
-      isLoading.value = false;
-    }, 2000);
+    isLoading.value = false;
   }
 };
+
+async function fetchAndShowPriceAtMoment() {
+  const isValidDate = !isNaN(Date.parse(selectedDateTime.value));
+
+  if (!isValidDate) {
+    alert("Please select a valid date and time");
+    return;
+  }
+
+  isLoading.value = true;
+
+  try {
+    const result = await fetchBitcoinPriceAtMoment(selectedDateTime.value);
+
+    if (result?.market_data?.current_price.usd) {
+      bitcoinData.current_price = parseFloat(
+        result.market_data.current_price.usd
+      ).toFixed(2);
+      bitcoinData.market_cap = parseFloat(
+        result.market_data.market_cap.usd
+      ).toFixed(2);
+      bitcoinData.total_volume = parseFloat(
+        result.market_data.total_volume.usd
+      ).toFixed(2);
+      showPriceAtMoment.value = true;
+    }
+  } catch (error) {
+    console.error("Error:", error);
+  } finally {
+    isLoading.value = false;
+  }
+}
 
 watch(days, fetchAndUpdateData, { immediate: true });
 
@@ -113,11 +150,36 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("resize", resizeListener);
 });
+
 </script>
 
 <template>
   <div>
     <div class="w-4/5 mx-auto mt-20 mb-10">
+      
+      <PriceAtMomentCard
+        :showPriceAtMoment="showPriceAtMoment"
+        :bitcoinData="bitcoinData"
+        :timestamp="selectedDateTime"
+        @hideModal="showPriceAtMoment = false"
+      />
+
+      <label for="datetime" class="block text-sm font-medium text-gray-700"
+        >Select a date and time:</label
+      >
+      <input
+        id="datetime"
+        type="datetime-local"
+        v-model="selectedDateTime"
+        class="block w-full px-3 py-2 mt-1 text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+      />
+
+      <button
+        @click="fetchAndShowPriceAtMoment"
+        class="mt-4 px-4 py-2 text-white bg-blue-500 rounded hover:bg-blue-700"
+      >
+        Fetch Bitcoin Price
+      </button>
       <div class="flex flex-col items-start mb-4">
         <label for="coin-select" class="mb-2 text-lg font-bold text-gray-700"
           >Choose a coin:</label
@@ -133,10 +195,13 @@ onUnmounted(() => {
           <option value="cosmos">Cosmos</option>
         </select>
       </div>
-      <p class="text-center text-lg font-medium mb-8">
-        Use the slider to select a range between 1 day and 1 year
-      </p>
-      <VueSlider v-model="days" :min="1" :max="365" :marks="marks"></VueSlider>
+
+      <template v-if="!showPriceAtMoment">
+        <p class="text-center text-lg font-medium mb-8">
+          Use the slider to select a range between 1 day and 1 year
+        </p>
+        <VueSlider v-model="days" :min="1" :max="365" :marks="marks"></VueSlider>
+      </template>
     </div>
     <div
       v-show="isLoading"
@@ -145,7 +210,7 @@ onUnmounted(() => {
     <div v-show="!isLoading">
       <CurrentBitcoinPrice />
       <div class="flex flex-col justify-center">
-        <h1 class="flex justify-center capitalize">{{ selectedCoin }}</h1>
+        <h1 class="flex justify-center capitalize">Historic data of selected coin: {{ selectedCoin }}</h1>
         <svg :width="width" height="500" ref="svgRef"></svg>
       </div>
     </div>
